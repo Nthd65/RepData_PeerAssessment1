@@ -4,22 +4,171 @@ output:
   html_document:
     keep_md: true
 ---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(ggplot2)
+```
 
 
 ## Loading and preprocessing the data
+```{r}
+# Load the data (assuming 'activity.csv' is in the working directory)
+activity_data <- read.csv("activity.csv")
+
+# Convert the 'date' column to Date format
+activity_data$date <- as.Date(activity_data$date, format = "%Y-%m-%d")
+
+# Check the data structure after preprocessing
+head(activity_data)
+```
 
 
 
 ## What is mean total number of steps taken per day?
+```{r}
+# 1. Calculate total steps per day (Ignoring NA using na.rm = TRUE)
+total_steps_per_day <- activity_data %>%
+  group_by(date) %>%
+  summarise(total_steps = sum(steps, na.rm = TRUE))
 
+# 2. Create Histogram
+hist(
+  total_steps_per_day$total_steps,
+  main = "Histogram of Total Steps Taken Per Day (Ignoring NA)",
+  xlab = "Total Steps",
+  ylab = "Frequency (Number of Days)",
+  col = "lightblue",
+  breaks = 12
+)
+```
+
+```{r}
+# 3. Calculate and report Mean and Median
+mean_steps_original <- mean(total_steps_per_day$total_steps)
+median_steps_original <- median(total_steps_per_day$total_steps)
+
+cat("Mean total steps per day (ignoring NA):", round(mean_steps_original, 2), "\n")
+cat("Median total steps per day (ignoring NA):", round(median_steps_original, 2), "\n")
+```
 
 
 ## What is the average daily activity pattern?
+```{r}
+# 1. Calculate average steps for each 5-minute interval across all days
+average_daily_pattern <- activity_data %>%
+  group_by(interval) %>%
+  summarise(avg_steps = mean(steps, na.rm = TRUE))
+
+# 2. Create Time Series Plot
+plot(
+  average_daily_pattern$interval,
+  average_daily_pattern$avg_steps,
+  type = "l",
+  main = "Average Steps per 5-minute Interval (Across All Days)",
+  xlab = "5-minute Interval",
+  ylab = "Average Number of Steps",
+  col = "blue"
+)
+```
+```{r}
+# 3. Find the 5-minute interval with the maximum average steps
+max_steps_interval <- average_daily_pattern[which.max(average_daily_pattern$avg_steps), ]
+
+cat("5-minute interval with maximum average steps:", max_steps_interval$interval, "\n")
+cat("Maximum average steps:", round(max_steps_interval$avg_steps, 2), "\n")
+```
 
 
 
 ## Imputing missing values
+```{r}
+# 1. Calculate and report the total number of missing values
+total_missing_values <- sum(is.na(activity_data$steps))
+cat("Total number of missing steps (NA values):", total_missing_values, "\n")
+```
+#Strategy for Imputing Missing Data
+Strategy: We use the mean of that 5-minute interval (calculated in the previous section) to fill in the NA values. This strategy is reasonable as it assumes that the activity during a specific time slot (e.g., 8:45 AM) is best approximated by the average activity for that time slot across all observed days.
 
+#Creating New Dataset and Analysis
+```{r}
+# Create a copy of the data
+imputed_data <- activity_data
+
+# Replace NA with the corresponding interval mean
+for (i in 1:nrow(imputed_data)) {
+  if (is.na(imputed_data$steps[i])) {
+    # Get the mean value for this interval from 'average_daily_pattern'
+    interval_mean <- average_daily_pattern %>%
+      filter(interval == imputed_data$interval[i]) %>%
+      pull(avg_steps)
+    
+    # Fill the value
+    imputed_data$steps[i] <- interval_mean
+  }
+}
+
+# 4. Recalculate and report (after imputing NA)
+total_steps_imputed <- imputed_data %>%
+  group_by(date) %>%
+  summarise(total_steps = sum(steps))
+
+# Histogram after imputing NA
+hist(
+  total_steps_imputed$total_steps,
+  main = "Histogram of Total Steps Per Day (After Imputing NA)",
+  xlab = "Total Steps",
+  ylab = "Frequency (Number of Days)",
+  col = "salmon",
+  breaks = 12
+)
+```
+#Mean and Median after Imputing NA
+```{r}
+mean_steps_imputed <- mean(total_steps_imputed$total_steps)
+median_steps_imputed <- median(total_steps_imputed$total_steps)
+
+cat("Mean total steps per day (imputed):", round(mean_steps_imputed, 2), "\n")
+cat("Median total steps per day (imputed):", round(median_steps_imputed, 2), "\n")
+
+cat("\n--- Impact of Imputing Missing Data ---\n")
+cat("Difference in Mean (Imputed - Original):", round(mean_steps_imputed - mean_steps_original, 2), "\n")
+cat("Difference in Median (Imputed - Original):", round(median_steps_imputed - median_steps_original, 2), "\n")
+cat("Impact: Imputing NA with the interval mean increased both the Mean and Median. This occurred because days with completely missing data (which resulted in 0 steps when ignoring NA) are now counted with a positive average value, making the distribution of total daily steps less sparse and more centrally located.")
+```
 
 
 ## Are there differences in activity patterns between weekdays and weekends?
+We create a new factor variable (day_type) to classify weekdays and weekends, and then create a panel plot comparing the average activity patterns between the two day types using the imputed data.
+
+```{r}
+# 1. Create "day_type" factor variable (weekday/weekend)
+imputed_data$day_of_week <- weekdays(imputed_data$date)
+
+imputed_data$day_type <- ifelse(
+  imputed_data$day_of_week %in% c("Saturday", "Sunday"), 
+  "weekend",
+  "weekday"
+)
+
+# Convert to factor
+imputed_data$day_type <- factor(imputed_data$day_type, levels = c("weekday", "weekend"))
+
+# 2. Calculate average steps by interval and day type
+average_steps_by_daytype <- imputed_data %>%
+  group_by(interval, day_type) %>%
+  summarise(avg_steps = mean(steps), .groups = 'drop')
+
+# 3. Create Comparison Panel Plot (using ggplot2)
+ggplot(average_steps_by_daytype, aes(x = interval, y = avg_steps, color = day_type)) +
+  geom_line() +
+  facet_grid(day_type ~ .) + # Split the plot into 2 rows by day_type
+  labs(
+    title = "Average Steps per 5-minute Interval: Weekday vs. Weekend",
+    x = "5-minute Interval",
+    y = "Average Number of Steps"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none") # Remove legend since facets are used
+```
+
